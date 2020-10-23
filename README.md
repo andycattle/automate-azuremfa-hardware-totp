@@ -1,6 +1,6 @@
 # Automate Azure MFA Hardware Tokens
 
-PowerShell script that can help automate the process of importing and activating hardware TOPT tokens into Azure MFA. Currently there are no buit-in PowerShell commands for this purpose.
+PowerShell script that can help automate the process of importing and activating hardware TOPT tokens into Azure MFA. Currently there are no built-in PowerShell commands for this purpose.
 
 ## Warning
 
