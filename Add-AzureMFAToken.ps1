@@ -349,7 +349,7 @@ if ($content."Serial Number" -eq $serialNumber) {
     $uploadState = Wait-AzMfaTokenUpload -name $uploadName -apiHost $apiHost -tokenApplication $tokenApplication
             
     if ($uploadState -eq $true) {
-      if($activeToken -eq $true) {
+      if($activate -eq $true) {
         # Activate token
         Enable-AzMfaToken -upn $upn -serialNumber $serialNumber -Secret $content.'Secret Key' -apiHost $apiHost -imageHost $imageHost -tokenApplication $tokenApplication
       }
