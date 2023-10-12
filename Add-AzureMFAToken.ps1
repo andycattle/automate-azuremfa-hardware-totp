@@ -74,7 +74,7 @@ param (
 
   [Parameter( Mandatory = $false)]
   [ValidateSet("AzureCloud", "AzureUSGovernment")]
-  [string]$azureEnvironment = "AzureCloud"
+  [string]$environment = "AzureCloud"
 )
 
 # Function to get a one-time password for a given secret
@@ -308,9 +308,9 @@ if ($content."Serial Number" -eq $serialNumber) {
   $uploaded = $false
 
   # Set variables based on Azure environment
-  $apiHost = if ($azureEnvironment -eq "AzureUSGovernment") {"main.iam.ad.ext.azure.us"} else {"main.iam.ad.ext.azure.com"}
-  $imageHost = if($azureEnvironment -eq "AzureUSGovernement"){"iam.hosting.azureportal.usgovcloudapi.net"} else {"iam.hosting.portal.azure.net"}
-  $tokenApplication = if($azureEnvironment -eq "AzureUSGovernement"){"ee62de39-b9b0-4886-aa58-08b89c4e3db3"} else {"74658136-14ec-4630-ad9b-26e160ff0fc6"}
+  $apiHost = if ($environment -eq "AzureUSGovernment") {"main.iam.ad.ext.azure.us"} else {"main.iam.ad.ext.azure.com"}
+  $imageHost = if($environment -eq "AzureUSGovernment"){"iam.hosting.azureportal.usgovcloudapi.net"} else {"iam.hosting.portal.azure.net"}
+  $tokenApplication = if($environment -eq "AzureUSGovernment"){"ee62de39-b9b0-4886-aa58-08b89c4e3db3"} else {"74658136-14ec-4630-ad9b-26e160ff0fc6"}
 
   try {
 
