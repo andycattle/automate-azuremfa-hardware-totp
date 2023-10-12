@@ -43,7 +43,7 @@
     
     upn,Serial Number,Secret Key,Time Interval,Manufacturer,Model
 
-.PARAMETER activeToken
+.PARAMETER activate
 
   Whether the token should be activated, defaults to true
 
@@ -70,7 +70,7 @@ param (
   [string]$tokensCSV,
   
   [Parameter (Mandatory = $false)]
-  [bool]$activeToken = $true,
+  [bool]$activate = $true,
 
   [Parameter( Mandatory = $false)]
   [ValidateSet("AzureCloud", "AzureUSGovernment")]
@@ -346,12 +346,12 @@ if ($content."Serial Number" -eq $serialNumber) {
     Write-Host "Uploaded Token Data" -ForegroundColor Green 
     # Poll upload until it applied
 
-    $uploadState = Wait-AzMfaTokenUpload -name $uploadName 
+    $uploadState = Wait-AzMfaTokenUpload -name $uploadName -apiHost $apiHost -tokenApplication $tokenApplication
             
     if ($uploadState -eq $true) {
       if($activeToken -eq $true) {
         # Activate token
-        Enable-AzMfaToken -upn $upn -serialNumber $serialNumber -Secret $content.'Secret Key'
+        Enable-AzMfaToken -upn $upn -serialNumber $serialNumber -Secret $content.'Secret Key' -apiHost $apiHost -imageHost $imageHost -tokenApplication $tokenApplication
       }
     }
     else {
