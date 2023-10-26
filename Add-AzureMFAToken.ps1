@@ -37,12 +37,20 @@
 
   The user principal name of the account to add to Azure MFA
   
-.PARAMETER  tokensCSV
+.PARAMETER tokensCSV
 
   Path to CSV file containing hardware tokens, with the following headings (UPN to be left empty):
     
     upn,Serial Number,Secret Key,Time Interval,Manufacturer,Model
-  
+
+.PARAMETER activate
+
+  Whether the token should be activated, defaults to true
+
+.PARAMETER environment
+
+  The Azure environment to use, defaults to AzureCloud.  Other option is AzureUSGovernment.
+
 .NOTES
   Version:        1.0
   Author:         Andy Cattle
@@ -59,8 +67,14 @@ param (
   [string]$serialNumber,
 
   [Parameter( Mandatory = $true)]
-  [string]$tokensCSV
+  [string]$tokensCSV,
   
+  [Parameter (Mandatory = $false)]
+  [bool]$activate = $true,
+
+  [Parameter( Mandatory = $false)]
+  [ValidateSet("AzureCloud", "AzureUSGovernment")]
+  [string]$environment = "AzureCloud"
 )
 
 # Function to get a one-time password for a given secret
@@ -136,7 +150,7 @@ function Get-Otp($Secret, $Length, $Window) {
   return $otp
 }
 
-function Wait-AzMfaTokenUpload ($name) {
+function Wait-AzMfaTokenUpload ($name, $apiHost, $tokenApplication) {
 
   $result = $false
   $pollPeriod = 5
@@ -146,10 +160,10 @@ function Wait-AzMfaTokenUpload ($name) {
 
   while ($result -eq $false -and $try++ -lt $numTries) {
 
-    Start-Sleep -Seconds $pollPeriod
-     
+    Start-Sleep -Seconds $pollPeriod    
+    
     $context = Get-AzContext
-    $token = [Microsoft.Azure.Commands.Common.Authentication.AzureSession]::Instance.AuthenticationFactory.Authenticate($context.Account, $context.Environment, $context.Tenant.Id, $null, "Never", $null, "74658136-14ec-4630-ad9b-26e160ff0fc6")
+    $token = [Microsoft.Azure.Commands.Common.Authentication.AzureSession]::Instance.AuthenticationFactory.Authenticate($context.Account, $context.Environment, $context.Tenant.Id, $null, "Never", $null, $tokenApplication)
 
     $headers = @{"Authorization" = "Bearer $($token.AccessToken)"
       'x-ms-client-request-id'   = [guid]::NewGuid()
@@ -159,7 +173,7 @@ function Wait-AzMfaTokenUpload ($name) {
 
     Write-Host "Waiting for `"$name`" upload to complete, try $try/$numTries..."
         
-    $testUrl = "https://main.iam.ad.ext.azure.com/api/MultiFactorAuthentication/HardwareToken/listUploads"
+    $testUrl = "https://$($apiHost)/api/MultiFactorAuthentication/HardwareToken/listUploads"
 
     $uploadStatus = Invoke-RestMethod -Uri $testUrl `
       -Headers $headers `
@@ -195,17 +209,17 @@ function Wait-AzMfaTokenUpload ($name) {
   return $false
 }
 
-function Enable-AzMfaToken($upn, $serialNumber, $Secret) {
+function Enable-AzMfaToken($upn, $serialNumber, $Secret, $apiHost, $imageHost, $tokenApplication) {
 
   $context = Get-AzContext
-  $token = [Microsoft.Azure.Commands.Common.Authentication.AzureSession]::Instance.AuthenticationFactory.Authenticate($context.Account, $context.Environment, $context.Tenant.Id, $null, "Never", $null, "74658136-14ec-4630-ad9b-26e160ff0fc6")
+  $token = [Microsoft.Azure.Commands.Common.Authentication.AzureSession]::Instance.AuthenticationFactory.Authenticate($context.Account, $context.Environment, $context.Tenant.Id, $null, "Never", $null, $tokenApplication)
 
   $headers = @{"Authorization" = "Bearer $($token.AccessToken)"
     'x-ms-client-request-id'   = [guid]::NewGuid()
     'x-ms-correlation-id'      = [guid]::NewGuid()
   }
 
-  $tokenDetailsUrl = "https://main.iam.ad.ext.azure.com/api/MultifactorAuthentication/HardwareToken/users?skipToken=&upn=$UPN&enabledFilter="
+  $tokenDetailsUrl = "https://$($apiHost)/api/MultifactorAuthentication/HardwareToken/users?skipToken=&upn=$UPN&enabledFilter="
 
   $tokenDetail = Invoke-RestMethod -Uri $tokenDetailsUrl `
     -Headers $headers `
@@ -222,7 +236,7 @@ function Enable-AzMfaToken($upn, $serialNumber, $Secret) {
     displayName      = $tokenDetail.displayName
     enableAction     = "Activate"
     enabled          = $tokenDetail.enabled
-    enabledImg       = "https://iam.hosting.portal.azure.net/iam/Content/Images/Directories/directoryDeletionRequirementMet.svg"
+    enabledImg       = "https://$($imageHost)/iam/Content/Images/Directories/directoryDeletionRequirementMet.svg"
     manufacturer     = $tokenDetail.manufacturer
     model            = $tokenDetail.model
     oathId           = $tokenDetail.oathId
@@ -235,7 +249,7 @@ function Enable-AzMfaToken($upn, $serialNumber, $Secret) {
 
   Write-Host "Attempting to activate token, upn: $($tokenDetail.upn), serial $($tokenDetail.serialNumber), otp: $oneTimePasscode"
 
-  $MfaActivateUri = "https://main.iam.ad.ext.azure.com/api/MultifactorAuthentication/HardwareToken/enable"
+  $MfaActivateUri = "https://$($apiHost)/api/MultifactorAuthentication/HardwareToken/enable"
 
   $headers = @{"Authorization" = "Bearer $($token.AccessToken)"
     'x-ms-client-request-id'   = [guid]::NewGuid()
@@ -253,8 +267,7 @@ function Enable-AzMfaToken($upn, $serialNumber, $Secret) {
   }
   catch {
     Write-Host "An Error Occurred: " -ForegroundColor Red
-    $_.Exception.Response | Format-List
-
+    $_.Exception.Response | Format-List    
   }
 
   if ($activated) {
@@ -265,11 +278,9 @@ function Enable-AzMfaToken($upn, $serialNumber, $Secret) {
   }
 
 }
-
   
 # Create a unique name used when uploading a new token
 $uploadName = "$([guid]::NewGuid()).csv"
-
 
 # Import CSV file and get line with matching serial number
 $content = Import-Csv -Path $tokensCSV `
@@ -296,14 +307,19 @@ if ($content."Serial Number" -eq $serialNumber) {
 
   $uploaded = $false
 
+  # Set variables based on Azure environment
+  $apiHost = if ($environment -eq "AzureUSGovernment") {"main.iam.ad.ext.azure.us"} else {"main.iam.ad.ext.azure.com"}
+  $imageHost = if($environment -eq "AzureUSGovernment"){"iam.hosting.azureportal.usgovcloudapi.net"} else {"iam.hosting.portal.azure.net"}
+  $tokenApplication = if($environment -eq "AzureUSGovernment"){"ee62de39-b9b0-4886-aa58-08b89c4e3db3"} else {"74658136-14ec-4630-ad9b-26e160ff0fc6"}
+
   try {
 
     # Endpoint for uploading hardware token
-    $uploadUrl = "https://main.iam.ad.ext.azure.com/api/MultifactorAuthentication/HardwareToken/upload"
+    $uploadUrl = "https://$($apiHost)/api/MultifactorAuthentication/HardwareToken/upload"
 
     # Get authorization token
     $context = Get-AzContext
-    $token = [Microsoft.Azure.Commands.Common.Authentication.AzureSession]::Instance.AuthenticationFactory.Authenticate($context.Account, $context.Environment, $context.Tenant.Id, $null, "Never", $null, "74658136-14ec-4630-ad9b-26e160ff0fc6")
+    $token = [Microsoft.Azure.Commands.Common.Authentication.AzureSession]::Instance.AuthenticationFactory.Authenticate($context.Account, $context.Environment, $context.Tenant.Id, $null, "Never", $null, $tokenApplication)
 
     # Headers for API call
     $headers = @{
@@ -330,12 +346,13 @@ if ($content."Serial Number" -eq $serialNumber) {
     Write-Host "Uploaded Token Data" -ForegroundColor Green 
     # Poll upload until it applied
 
-    $uploadState = Wait-AzMfaTokenUpload -name $uploadName 
+    $uploadState = Wait-AzMfaTokenUpload -name $uploadName -apiHost $apiHost -tokenApplication $tokenApplication
             
     if ($uploadState -eq $true) {
-            
-      # Activate token
-      Enable-AzMfaToken -upn $upn -serialNumber $serialNumber -Secret $content.'Secret Key'
+      if($activate -eq $true) {
+        # Activate token
+        Enable-AzMfaToken -upn $upn -serialNumber $serialNumber -Secret $content.'Secret Key' -apiHost $apiHost -imageHost $imageHost -tokenApplication $tokenApplication
+      }
     }
     else {
 
